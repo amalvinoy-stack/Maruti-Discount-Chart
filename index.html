@@ -275,6 +275,9 @@
     .no-match{padding:15px 16px;border-radius:10px;font-size:14px;}
   }
   .no-match b{display:block;font-size:15.5px;margin-bottom:4px;}
+  .age-band-error{background:#fff0f0;border:2px solid #c62828;color:#b71c1c;border-radius:12px;padding:20px 22px;font-size:15px;line-height:1.65;text-align:center;}
+  .age-band-error .error-title{display:block;font-size:24px;font-weight:800;letter-spacing:0.5px;margin-bottom:8px;color:#c62828;}
+  @media (max-width:480px){.age-band-error{padding:17px 15px;font-size:14px;}.age-band-error .error-title{font-size:21px;}}
 
   footer{
     margin-top:22px;
@@ -363,8 +366,14 @@
     <div class="field">
       <label>Registration Date<span class="req">*</span></label>
       <input type="date" id="regDate">
-      <div class="hint" id="ageHint"></div>
       <div class="err" id="dateErr">Registration date can't be in the future.</div>
+    </div>
+
+    <div class="field">
+      <label>Policy Start Date<span class="req">*</span></label>
+      <input type="date" id="policyStartDate">
+      <div class="hint" id="ageHint"></div>
+      <div class="err" id="policyDateErr">Policy start date cannot be before the registration date.</div>
     </div>
 
     <div class="actions">
@@ -510,30 +519,70 @@ fuelSel.addEventListener('change', ()=>{
     : 'Choose fuel first to narrow the list, or just start typing.';
 });
 
+const policyStartDateEl = document.getElementById('policyStartDate');
+const policyDateErr = document.getElementById('policyDateErr');
+
 function updateAgeHint(){
   dateErr.classList.remove('show');
-  if(!regDateEl.value){ ageHint.textContent = ''; return; }
+  policyDateErr.classList.remove('show');
+
+  if(!regDateEl.value){
+    ageHint.textContent = '';
+    return;
+  }
+
+  const reg = new Date(regDateEl.value + 'T00:00:00');
+
+  // Registration date cannot be in the future.
   const today = new Date();
   today.setHours(0,0,0,0);
-  const reg = new Date(regDateEl.value + 'T00:00:00');
-  const diffDays = Math.round((today - reg) / 86400000);
-  if(diffDays < 0){
+
+  if(reg > today){
     ageHint.textContent = '';
     dateErr.classList.add('show');
     return;
   }
+
+  // Policy Start Date is required for calculating the vehicle age.
+  if(!policyStartDateEl.value){
+    ageHint.textContent = '';
+    return;
+  }
+
+  const policyStart = new Date(policyStartDateEl.value + 'T00:00:00');
+
+  // Vehicle age is calculated up to the day BEFORE the policy start date.
+  const ageAsOf = new Date(policyStart.getTime());
+  ageAsOf.setDate(ageAsOf.getDate() - 1);
+
+  const diffDays = Math.round((ageAsOf - reg) / 86400000);
+
+  // The day-before-policy-start date cannot be before Registration Date.
+  if(diffDays < 0){
+    ageHint.textContent = '';
+    policyDateErr.classList.add('show');
+    return;
+  }
+
   const years = Math.floor(diffDays/365);
   const days = diffDays % 365;
-  ageHint.textContent = 'Vehicle age: ' + diffDays + ' day' + (diffDays===1?'':'s') +
+
+  ageHint.textContent = 'Vehicle age on day before policy start: ' + diffDays + ' day' + (diffDays===1?'':'s') +
     (years > 0 ? '  (~' + years + ' yr' + (years===1?'':'s') + (days>0 ? ' ' + days + ' days' : '') + ')' : '');
 }
+
 regDateEl.addEventListener('change', updateAgeHint);
+policyStartDateEl.addEventListener('change', updateAgeHint);
 
 function computeAgeDays(){
-  const today = new Date();
-  today.setHours(0,0,0,0);
   const reg = new Date(regDateEl.value + 'T00:00:00');
-  return Math.round((today - reg) / 86400000);
+  const policyStart = new Date(policyStartDateEl.value + 'T00:00:00');
+
+  // Use the day BEFORE the policy start date for the age/slab calculation.
+  const ageAsOf = new Date(policyStart.getTime());
+  ageAsOf.setDate(ageAsOf.getDate() - 1);
+
+  return Math.round((ageAsOf - reg) / 86400000);
 }
 
 function findRow(modelIdx, fuel, ncb, biz, veh, ageDays){
@@ -557,24 +606,41 @@ document.getElementById('calcBtn').addEventListener('click', ()=>{
   const fuel = fuelSel.value;
   const modelIdxRaw = modelValue.value;
   const regDate = regDateEl.value;
+  const policyStartDate = policyStartDateEl.value;
 
-  if(!vehicle || !business || !ncb || !fuel || modelIdxRaw === '' || !regDate){
+  if(!vehicle || !business || !ncb || !fuel || modelIdxRaw === '' || !regDate || !policyStartDate){
     formErr.classList.add('show');
     resultWrap.classList.remove('show');
     return;
   }
+
   updateAgeHint();
-  if(dateErr.classList.contains('show')) return;
+
+  if(dateErr.classList.contains('show') || policyDateErr.classList.contains('show')) return;
 
   formErr.classList.remove('show');
   const modelIdx = parseInt(modelIdxRaw,10);
   const ageDays = computeAgeDays();
   const modelName = DATA.models[modelIdx];
 
-  const row = findRow(modelIdx, fuel, ncb, business, vehicle, ageDays);
-
   resultWrap.innerHTML = '';
   resultWrap.classList.add('show');
+
+  // The discount chart does not define the 731–1095 day age band.
+  // Stop the calculation here rather than silently using another age band.
+  if(ageDays >= 731 && ageDays <= 1095){
+    const div = document.createElement('div');
+    div.className = 'age-band-error';
+    div.innerHTML = '<span class="error-title">ERROR</span>' +
+      'No discount is specified in the Maruti Discount Chart for this vehicle age band. ' +
+      'Please verify the applicable discount in GC to ensure accurate calculation. ' +
+      'We regret the inconvenience caused.';
+    resultWrap.appendChild(div);
+    resultWrap.scrollIntoView({behavior:'smooth', block:'nearest'});
+    return;
+  }
+
+  const row = findRow(modelIdx, fuel, ncb, business, vehicle, ageDays);
 
   if(row){
     const discount = row[7];
@@ -612,8 +678,10 @@ document.getElementById('resetBtn').addEventListener('click', ()=>{
   modelValue.value = '';
   modelInput.value = '';
   regDateEl.value = '';
+  policyStartDateEl.value = '';
   ageHint.textContent = '';
   dateErr.classList.remove('show');
+  policyDateErr.classList.remove('show');
   formErr.classList.remove('show');
   modelHint.textContent = 'Choose fuel first to narrow the list, or just start typing.';
   resultWrap.classList.remove('show');
