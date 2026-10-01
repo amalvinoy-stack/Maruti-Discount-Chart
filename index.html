@@ -632,8 +632,9 @@ document.getElementById('calcBtn').addEventListener('click', ()=>{
     const div = document.createElement('div');
     div.className = 'age-band-error';
     div.innerHTML = '<span class="error-title">ERROR</span>' +
-      'No discount is specified in the Maruti Discount Chart for this vehicle age band. ' +
-      'Please verify the applicable discount in GC to ensure accurate calculation. ' +
+      'This age band (731 Days - 1095 Days) is currently under maintenance. ' +
+      'The applicable discount is being updated in the calculator. ' +
+      'Please verify the discount in GC before proceeding. ' +
       'We regret the inconvenience caused.';
     resultWrap.appendChild(div);
     resultWrap.scrollIntoView({behavior:'smooth', block:'nearest'});
